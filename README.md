@@ -59,11 +59,11 @@ services:
     ports:
       - "5678:5678"
     environment:
-      - N8N_HOST=ema.ink
+      - N8N_HOST=yourdomain.com              # 替换为你的域名      
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
       - NODE_ENV=production
-      - WEBHOOK_URL=https://ema.ink/
+      - WEBHOOK_URL=https://yourdomain.com              # 替换为你的域名/
       - GENERIC_TIMEZONE=Asia/Shanghai
       - N8N_DEFAULT_LOCALE=zh-CN
       # --- 小内存深度优化 ---
@@ -90,7 +90,7 @@ vi /etc/nginx/sites-available/n8n
 
 server {
     listen 80;
-    server_name ema.ink;
+    server_name yourdomain.com              # 替换为你的域名;
 
     # 解决大图上传无响应的核心配置
     client_max_body_size 100M; 
@@ -123,7 +123,7 @@ nginx -t && systemctl reload nginx
 ### 1. 一键申请证书：
 选 2 (Redirect) 实现全站加密
 ```Bash
-certbot --nginx -d ema.ink
+certbot --nginx -d yourdomain.com              # 替换为你的域名
 ```
 
 
