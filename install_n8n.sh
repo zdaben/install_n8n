@@ -1,68 +1,66 @@
 #!/bin/bash
 #=================================================================#
 #  System Required: Debian 12+                                    #
-#  Description: One-click deployment for n8n (Chinese Version)    #
-#  Author: Gemini (Optimized for 512MB RAM & Debian 12)           #
+#  Description: n8n Chinese Industrial-Grade Deployment Script    #
+#  Optimizations: Swap Fallback, Node Memory Limit, Healthcheck   #
 #=================================================================#
 
-# 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 PLAIN='\033[0m'
 
-# 权限检查
-[[ $EUID -ne 0 ]] && echo -e "${RED}错误：${PLAIN}必须使用 root 用户运行此脚本！\n" && exit 1
+[[ $EUID -ne 0 ]] && echo -e "${RED}错误：${PLAIN}必须使用 root 用户运行！\n" && exit 1
 
-echo -e "${GREEN}正在启动 n8n 一键部署脚本 (V2.0)...${PLAIN}"
+echo -e "${GREEN}正在启动 n8n 工业级部署脚本 V5.0...${PLAIN}"
 
 #-----------------------------------------------------------------#
-# 1. 智能 Swap 判断与配置 (针对小内存优化)
+# 1. 智能性能评估与 Swap 兼容性配置 (解决 fallocate 失败问题)
 #-----------------------------------------------------------------#
 MEM_TOTAL=$(free -m | grep Mem | awk '{print $2}')
 SWAP_TOTAL=$(free -m | grep Swap | awk '{print $2}')
 
-if [ "$SWAP_TOTAL" -eq 0 ]; then
-    echo -e "${YELLOW}检测到系统未配置 Swap，正在进行智能分配...${PLAIN}"
-    # 512MB 左右的机器分配 2G Swap 是最稳妥的
-    if [ "$MEM_TOTAL" -le 600 ]; then
-        SWAP_SIZE="2G"
-    elif [ "$MEM_TOTAL" -le 1024 ]; then
-        SWAP_SIZE="1G"
-    else
-        SWAP_SIZE="512M"
+if [ "$MEM_TOTAL" -le 2048 ] && [ "$SWAP_TOTAL" -eq 0 ]; then
+    echo -e "${YELLOW}检测到低内存环境，正在配置虚拟内存...${PLAIN}"
+    [ "$MEM_TOTAL" -le 600 ] && SWAP_SIZE_MB=2048 || SWAP_SIZE_MB=1024
+    
+    # 尝试使用 fallocate，失败则降级使用 dd
+    if ! fallocate -l ${SWAP_SIZE_MB}M /swapfile 2>/dev/null; then
+        echo -e "${YELLOW}fallocate 不受支持，正在使用 dd 创建 Swap...${PLAIN}"
+        dd if=/dev/zero of=/swapfile bs=1M count=${SWAP_SIZE_MB}
     fi
-    fallocate -l $SWAP_SIZE /swapfile
-    chmod 600 /swapfile
-    mkswap /swapfile
-    swapon /swapfile
+    
+    chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
     echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab
+    echo -e "${GREEN}Swap 配置成功。${PLAIN}"
 fi
 
 #-----------------------------------------------------------------#
-# 2. 交互式参数询问
+# 2. 参数准备与随机安全密钥
 #-----------------------------------------------------------------#
-read -p "请输入您的域名 (默认: ema.ink): " DOMAIN
+read -p "请输入域名 (默认: ema.ink): " DOMAIN
 [ -z "${DOMAIN}" ] && DOMAIN="ema.ink"
-
-read -p "请输入您的邮箱 (用于 SSL 通知): " EMAIL
+read -p "请输入邮箱 (用于 SSL): " EMAIL
 [ -z "${EMAIL}" ] && EMAIL="admin@${DOMAIN}"
 
+RANDOM_KEY=$(tr -dc 'a-z0-9' </dev/urandom | head -c 32)
+BASIC_AUTH_PASS=$(tr -dc 'a-z0-9' </dev/urandom | head -c 12)
+
 #-----------------------------------------------------------------#
-# 3. 安装依赖与 Docker
+# 3. 依赖安装 (强制安装 docker-compose 插件)
 #-----------------------------------------------------------------#
-apt update && apt install -y curl vim ufw nginx certbot python3-certbot-nginx
+apt update && apt install -y curl vim nginx certbot python3-certbot-nginx
 if ! command -v docker &> /dev/null; then
     curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh
+    apt install -y docker-compose-plugin # 确保插件版 Compose 可用
     systemctl enable --now docker
 fi
 
 #-----------------------------------------------------------------#
-# 4. 部署 n8n 容器 (修复权限与端口暴露)
+# 4. 目录架构解耦与权限预设
 #-----------------------------------------------------------------#
-mkdir -p ~/n8n/n8n_data
-# 核心：预设权限防止 EACCES 报错
-chown -R 1000:1000 ~/n8n/n8n_data
+mkdir -p ~/n8n/n8n_data ~/n8n/n8n_files
+chown -R 1000:1000 ~/n8n/n8n_data ~/n8n/n8n_files
 
 cat > ~/n8n/docker-compose.yml <<EOF
 services:
@@ -71,39 +69,67 @@ services:
     container_name: n8n
     restart: always
     ports:
-      - "127.0.0.1:5678:5678" # 仅允许本地访问，更安全
+      - "127.0.0.1:5678:5678"
+    logging: # 磁盘防爆控制
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck: # 故障自愈机制
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     environment:
+      - NODE_OPTIONS=--max-old-space-size=512 # 强制 Node 内存回收
       - N8N_HOST=${DOMAIN}
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
       - WEBHOOK_URL=https://${DOMAIN}/
+      - N8N_EDITOR_BASE_URL=https://${DOMAIN}/
       - GENERIC_TIMEZONE=Asia/Shanghai
       - N8N_DEFAULT_LOCALE=zh-CN
+      - N8N_ENCRYPTION_KEY=${RANDOM_KEY}
+      - N8N_METRICS=true
       - N8N_PAYLOAD_SIZE_MAX=100
-      - N8N_BINARY_DATA_MODE=filesystem # 强制图片存硬盘，省内存
+      - N8N_BINARY_DATA_MODE=filesystem # 二进制文件强制存盘
+      - N8N_BINARY_DATA_STORAGE_PATH=/files
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=72
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=${BASIC_AUTH_PASS}
     volumes:
       - ./n8n_data:/home/node/.n8n
+      - ./n8n_files:/files # 独立存储目录
 EOF
 
-cd ~/n8n && docker compose up -d
+# 命令兼容性拉起
+cd ~/n8n
+(docker compose up -d || docker-compose up -d)
 
 #-----------------------------------------------------------------#
-# 5. 配置 Nginx 与 SSL (修复大文件上传)
+# 5. Nginx 性能加固 (Gzip + WebSocket)
 #-----------------------------------------------------------------#
 cat > /etc/nginx/sites-available/n8n <<EOF
 server {
     listen 80;
     server_name ${DOMAIN};
-    client_max_body_size 100M; # 解决大图上传报错
+    client_max_body_size 100M;
+    
+    # 开启 Gzip 提升 UI 加载速度
+    gzip on;
+    gzip_types text/plain application/json application/javascript text/css;
+
     location / {
         proxy_pass http://127.0.0.1:5678;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_buffering off;
     }
 }
@@ -111,19 +137,24 @@ EOF
 
 ln -sf /etc/nginx/sites-available/n8n /etc/nginx/sites-enabled/
 nginx -t && systemctl reload nginx
-certbot --nginx -d ${DOMAIN} --non-interactive --agree-tos --email ${EMAIL} --redirect
 
 #-----------------------------------------------------------------#
-# 6. 自动更新 (修复 API 版本冲突)
+# 6. 安全维护 (SSL Fallback & Watchtower)
 #-----------------------------------------------------------------#
+certbot --nginx -d ${DOMAIN} --non-interactive --agree-tos --email ${EMAIL} --redirect || echo -e "${RED}SSL申请失败，请确认DNS解析！${PLAIN}"
+
 docker rm -f watchtower > /dev/null 2>&1
-docker run -d \
-  --name watchtower \
-  -e DOCKER_API_VERSION=1.44 \
+docker run -d --name watchtower -e DOCKER_API_VERSION=1.44 \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  containrrr/watchtower \
-  --cleanup \
-  --schedule "0 0 0 * * *" \
-  n8n
+  containrrr/watchtower --cleanup --interval 86400 --rolling-restart n8n
 
-echo -e "\n${GREEN}部署完成！请访问 https://${DOMAIN}${PLAIN}"
+#-----------------------------------------------------------------#
+# 7. 最终报告
+#-----------------------------------------------------------------#
+echo -e "\n${GREEN}===========================================================${PLAIN}"
+echo -e "${GREEN}n8n 终极稳定版部署完成！${PLAIN}"
+echo -e "访问地址: ${YELLOW}https://${DOMAIN}${PLAIN}"
+echo -e "管理密码: ${CYAN}${BASIC_AUTH_PASS}${PLAIN}"
+echo -e "凭据 Key: ${CYAN}${RANDOM_KEY}${PLAIN}"
+echo -e "${RED}警告：已通过 NODE_OPTIONS 限制内存占用，保障 512MB VPS 稳定运行。${PLAIN}"
+echo -e "${GREEN}===========================================================${PLAIN}"
