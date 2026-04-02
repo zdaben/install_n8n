@@ -302,7 +302,7 @@ main() {
     echo -e "默认账户: ${CYAN}admin${PLAIN}"
     echo -e "初始密码: ${CYAN}${BASIC_AUTH_PASS}${PLAIN}"
     echo -e "加密密钥: ${CYAN}${RANDOM_KEY}${PLAIN} ${YELLOW}(请务必妥善保存！)${PLAIN}"
-    echo -e "新增功能: 每日凌晨3点全量备份 (/root/n8n_backup)、Nginx 超时保活防断连"
+    echo -e "全量备份: /root/n8n_backup
     echo -e "${GREEN}===========================================================${PLAIN}"
 }
 
