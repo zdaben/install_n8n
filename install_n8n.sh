@@ -8,9 +8,30 @@
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
 PLAIN='\033[0m'
 
 [[ $EUID -ne 0 ]] && echo -e "${RED}错误：${PLAIN}必须使用 root 用户运行！\n" && exit 1
+
+#-----------------------------------------------------------------#
+# 0. 快捷更新模块 (如果带 update 参数则只执行更新逻辑)
+#-----------------------------------------------------------------#
+if [ "$1" == "update" ]; then
+    echo -e "${GREEN}正在强制拉取最新的 n8n 汉化镜像并更新...${PLAIN}"
+    cd ~/n8n || { echo -e "${RED}未找到安装目录 ~/n8n，请先执行安装！${PLAIN}"; exit 1; }
+    
+    # 拉取最新镜像
+    docker compose pull || docker-compose pull
+    # 重启并应用新镜像
+    docker compose up -d || docker-compose up -d
+    # 自动清理被替换掉的旧版本镜像以释放空间
+    docker image prune -f
+    
+    echo -e "${GREEN}===========================================================${PLAIN}"
+    echo -e "${GREEN}更新完成！请刷新浏览器查看最新版本。${PLAIN}"
+    echo -e "${GREEN}===========================================================${PLAIN}"
+    exit 0
+fi
 
 echo -e "${GREEN}正在启动 n8n 工业级部署脚本 V5.0...${PLAIN}"
 
