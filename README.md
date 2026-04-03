@@ -2,7 +2,7 @@
 
 ```Bash
 # N8N一键部署脚本
-wget -O install_n8n.sh "https://raw.githubusercontent.com/zdaben/install_n8n/main/install_n8n.sh" && chmod +x install_n8n.sh && ./install_n8n.sh
+apt update -y && apt install curl wget sudo -y && curl -sSLo /usr/local/bin/n8n https://raw.githubusercontent.com/zdaben/n8n/main/n8n.sh && chmod +x /usr/local/bin/n8n && n8n install
 ```
 
 
