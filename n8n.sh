@@ -17,8 +17,12 @@ N8N_DIR="/root/n8n"
 BACKUP_DIR="${N8N_DIR}/backup"
 DOCKER_COMPOSE_CMD=""
 
+# 【修复核心】彻底改写为规范的 if 结构，告别静默退出
 check_root() {
-    [[ $EUID -ne 0 ]] && echo -e "${RED}错误：必须使用 root 用户运行。${PLAIN}" && exit 1
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${RED}错误：必须使用 root 用户运行。${PLAIN}"
+        exit 1
+    fi
 }
 
 init_docker_compose() {
@@ -42,9 +46,10 @@ cmd_show_panel() {
     local PASS=$(grep -E 'N8N_BASIC_AUTH_PASSWORD=' "${N8N_DIR}/docker-compose.yml" | cut -d'=' -f2 | tr -d '"\r' || echo "未知")
     local KEY=$(grep -E 'N8N_ENCRYPTION_KEY=' "${N8N_DIR}/docker-compose.yml" | cut -d'=' -f2 | tr -d '"\r' || echo "未知")
     
-    # 修复端口正则截取逻辑
-    local PORT=$(grep -oE '127\.0\.0\.1:[0-9]+' "${N8N_DIR}/docker-compose.yml" | cut -d':' -f2 | head -n 1)
-    [ -z "$PORT" ] && PORT="5678"
+    local PORT=$(grep -oE '127\.0\.0\.1:[0-9]+' "${N8N_DIR}/docker-compose.yml" | cut -d':' -f2 | head -n 1 || true)
+    if [ -z "$PORT" ]; then
+        PORT="5678"
+    fi
 
     echo -e "\n${GREEN}===========================================================${PLAIN}"
     echo -e "${GREEN}n8n 管理面板${PLAIN}"
@@ -211,7 +216,6 @@ EOF
     ln -sf /etc/nginx/sites-available/n8n /etc/nginx/sites-enabled/
     nginx -t && systemctl reload nginx
 
-    # 关键修复：加入 --keep-until-expiring 解决二次安装时 Certbot 因已有证书而罢工导致只有 HTTP 的问题
     echo -e "${GREEN}==> 配置 SSL 证书...${PLAIN}"
     certbot --nginx -d ${DOMAIN} --non-interactive --agree-tos --email ${EMAIL} --redirect --keep-until-expiring || echo -e "${YELLOW}警告：SSL 配置异常，请后续手动执行 certbot --nginx 修复。${PLAIN}"
     
@@ -249,7 +253,7 @@ cmd_backup() {
 }
 
 cmd_recover() {
-    init_docker_compose; set +e
+    init_docker_compose
     echo -e "${CYAN}--- 数据恢复面板 ---${PLAIN}"
     if [ ! -d "${BACKUP_DIR}" ]; then
         echo "未找到备份文件"
