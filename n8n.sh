@@ -17,7 +17,6 @@ N8N_DIR="/root/n8n"
 BACKUP_DIR="${N8N_DIR}/backup"
 DOCKER_COMPOSE_CMD=""
 
-# 【修复核心】彻底改写为规范的 if 结构，告别静默退出
 check_root() {
     if [ "$EUID" -ne 0 ]; then
         echo -e "${RED}错误：必须使用 root 用户运行。${PLAIN}"
@@ -62,6 +61,7 @@ cmd_show_panel() {
     echo -e "-----------------------------------------------------------"
     echo -e "${GREEN}命令列表:${PLAIN}"
     echo -e "  ${YELLOW}n8n status${PLAIN}    - 查看服务状态与资源占用"
+    echo -e "  ${YELLOW}n8n top${PLAIN}       - 查看实时资源监控"
     echo -e "  ${YELLOW}n8n update${PLAIN}    - 更新官方引擎与汉化补丁"
     echo -e "  ${YELLOW}n8n restart${PLAIN}   - 重启容器服务"
     echo -e "  ${YELLOW}n8n backup${PLAIN}    - 执行数据与配置备份"
@@ -228,17 +228,14 @@ cmd_update() {
     check_root; init_docker_compose
     echo -e "${GREEN}==> 检测版本信息...${PLAIN}"
     
-    # 1. 提取当前本地运行的版本
     local CURRENT_VERSION=$(grep -oE 'n8nio/n8n:[a-zA-Z0-9.-]+' "${N8N_DIR}/docker-compose.yml" | cut -d':' -f2 || echo "未知")
     echo -e "当前本地版本: ${CYAN}${CURRENT_VERSION}${PLAIN}"
 
-    # 2. 拉取最新稳定版 (基于汉化补丁发布的最新对齐版本)
-    echo "正在拉取最新稳定版信息..."
+    echo "正在拉取云端最新稳定版信息..."
     local LATEST_API=$(curl -sL "https://api.github.com/repos/other-blowsnow/n8n-i18n-chinese/releases/latest" || true)
     local TARGET_VERSION=$(echo "$LATEST_API" | jq -r '.tag_name' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "latest")
     echo -e "云端最新稳定版: ${YELLOW}${TARGET_VERSION}${PLAIN}"
 
-    # 3. 版本一致性防呆检测
     if [ "$CURRENT_VERSION" == "$TARGET_VERSION" ] && [ "$CURRENT_VERSION" != "未知" ]; then
         echo -e "\n${GREEN}当前已经是最新稳定版本，无需更新。${PLAIN}"
         read -p "是否强制重新拉取并覆盖安装？(y/n) [默认: n]: " FORCE_UPDATE
@@ -265,7 +262,6 @@ cmd_update() {
     sed -i "s|image: n8nio/n8n:.*|image: n8nio/n8n:${TARGET_VERSION}|g" "${N8N_DIR}/docker-compose.yml"
     cd "${N8N_DIR}" && $DOCKER_COMPOSE_CMD pull && $DOCKER_COMPOSE_CMD up -d
     
-    # 清理产生的旧版本废弃镜像以释放磁盘空间
     docker image prune -f
     echo -e "${GREEN}更新完成！系统当前已运行版本: ${CYAN}${TARGET_VERSION}${PLAIN}"
 }
@@ -283,15 +279,19 @@ cmd_backup() {
 cmd_recover() {
     init_docker_compose
     echo -e "${CYAN}--- 数据恢复面板 ---${PLAIN}"
-    if [ ! -d "${BACKUP_DIR}" ]; then
-        echo "未找到备份文件"
+    
+    # 【修复项】检查目录是否存在，且目录中是否包含有效备份文件
+    if [ ! -d "${BACKUP_DIR}" ] || ! ls "${BACKUP_DIR}"/n8n_*.tar.gz 1> /dev/null 2>&1; then
+        echo -e "${YELLOW}未找到任何备份归档文件！${PLAIN}"
         exit 1
     fi
+    
     ls -lh "${BACKUP_DIR}"/n8n_*.tar.gz | awk '{print NR". "$9" ("$5")"}' | sed "s|${BACKUP_DIR}/||"
     read -p "请选择恢复编号 (输入 0 取消): " IDX
     if [ "$IDX" -eq 0 ]; then
         exit 0
     fi
+    
     FILE=$(ls "${BACKUP_DIR}"/n8n_*.tar.gz | sed -n "${IDX}p")
     cd "${N8N_DIR}" && $DOCKER_COMPOSE_CMD down
     rm -rf n8n_data n8n_files docker-compose.yml
@@ -326,7 +326,6 @@ cmd_uninstall() {
     fi
 }
 
-# --- 新增 status 与 top 的标准函数封装 ---
 cmd_status() {
     init_docker_compose
     local VERSION=$(grep -oE 'n8nio/n8n:[a-zA-Z0-9.-]+' "${N8N_DIR}/docker-compose.yml" | cut -d':' -f2 || echo "未知")
@@ -343,7 +342,6 @@ cmd_top() {
     docker stats n8n 
 }
 
-# --- 极简的全局路由 ---
 case "$1" in
     install)   cmd_install ;;
     update)    cmd_update ;;
