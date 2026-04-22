@@ -326,23 +326,29 @@ cmd_uninstall() {
     fi
 }
 
+# --- 新增 status 与 top 的标准函数封装 ---
+cmd_status() {
+    init_docker_compose
+    local VERSION=$(grep -oE 'n8nio/n8n:[a-zA-Z0-9.-]+' "${N8N_DIR}/docker-compose.yml" | cut -d':' -f2 || echo "未知")
+    echo -e "\n${GREEN}▶ n8n 当前运行版本: ${CYAN}${VERSION}${PLAIN}"
+    echo -e "-----------------------------------------------------------"
+    docker ps -f name=n8n
+    echo -e "\n${GREEN}▶ 资源占用情况 (静态快照):${PLAIN}"
+    docker stats --no-stream n8n 
+}
+
+cmd_top() {
+    init_docker_compose
+    echo -e "${YELLOW}提示: 正在进入实时监控模式，按 Ctrl+C 退出。${PLAIN}"
+    docker stats n8n 
+}
+
+# --- 极简的全局路由 ---
 case "$1" in
     install)   cmd_install ;;
     update)    cmd_update ;;
-    status) 
-        init_docker_compose
-        local VERSION=$(grep -oE 'n8nio/n8n:[a-zA-Z0-9.-]+' "${N8N_DIR}/docker-compose.yml" | cut -d':' -f2 || echo "未知")
-        echo -e "\n${GREEN}▶ n8n 当前运行版本: ${CYAN}${VERSION}${PLAIN}"
-        echo -e "-----------------------------------------------------------"
-        docker ps -f name=n8n
-        echo -e "\n${GREEN}▶ 资源占用情况 (静态快照):${PLAIN}"
-        docker stats --no-stream n8n 
-        ;;
-    top) 
-        init_docker_compose
-        echo -e "${YELLOW}提示: 正在进入实时监控模式，按 Ctrl+C 退出。${PLAIN}"
-        docker stats n8n 
-        ;;
+    status)    cmd_status ;;
+    top)       cmd_top ;;
     restart)   init_docker_compose && cd "${N8N_DIR}" && $DOCKER_COMPOSE_CMD restart ;;
     backup)    cmd_backup ;;
     recover)   cmd_recover ;;
